@@ -33,8 +33,8 @@ import android.util.Log;
 import android.view.WindowManager;
 import android.widget.TextView;
 
-import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -51,11 +51,6 @@ public class GattServerActivity extends Activity {
     private TextView mAdapterAddress;
     /* Bluetooth API */
     private BluetoothManager mBluetoothManager;
-
-    /**
-     * Google IoT core connection
-     */
-    private GoogleIoT googleIoT;
 
     /**
      * AWS IoT
@@ -82,8 +77,9 @@ public class GattServerActivity extends Activity {
      */
     private List<LeSensor> sensors = new ArrayList<LeSensor>() {
         {
-//            add(new LeSensor("ST-1", "24:71:89:C1:44:02"));
-            add(new LeSensor("ST-2", "24:71:89:08:BD:82"));
+            add(new LeSensor("DHT-1", "CF:37:9A:3A:5B:01"));
+//            add(new LeSensor("ST-1", "B0:B4:48:ED:C8:83"));
+//            add(new LeSensor("ST-2", "24:71:89:08:BD:82"));
         }
     };
 
@@ -153,8 +149,8 @@ public class GattServerActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_server);
 
-        googleIoT = new GoogleIoT(getResources());
-        awsIot = new AwsIot();
+        awsIot = new AwsIot(this);
+        awsIot.connect();
 
         mLocalTimeView = (TextView) findViewById(R.id.text_time);
         mAdapterAddress = (TextView) findViewById(R.id.text_address);
@@ -206,7 +202,6 @@ public class GattServerActivity extends Activity {
     protected void onDestroy() {
         super.onDestroy();
 
-        googleIoT.disconnect();
         awsIot.disconnect();
         unregisterReceiver(mBluetoothReceiver);
     }
@@ -321,12 +316,29 @@ public class GattServerActivity extends Activity {
                                  ",\"timestamp\": \"" + timestamp + "\"" +
                                  ",\"value\":\"" + String.valueOf(temp) + "\"}";
                         Log.i(TAG, strVal);
-//                        googleIoT.publishTelemetry(strVal);
+//                        awsIot.publish("myTopic/1", strVal);
                         break;
                 }
+
                 mAdapterAddress.setText("Read " + currentSensor().getName());
                 mLocalTimeView.setText(strVal);
                 mBluetoothLeService.close();
+            } else if (BluetoothLeService.ACTION_BROADCAST_DATA_AVAILABLE.equals(action)) {
+                Log.i(TAG, "Action Broadcast Data Available");
+
+                LocalDateTime now = LocalDateTime.now();
+                long epoch = now.atZone(ZoneId.of("UTC")).toInstant().toEpochMilli();
+                String timestamp = now.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+                double temp = intent.getDoubleExtra(BluetoothLeService.DATA_TYPE_TEMP, 0.0d);
+                double hmdt = intent.getDoubleExtra(BluetoothLeService.DATA_TYPE_HMDT, 0.0d);
+                String strVal = "{\"deviceId\":\"" + currentSensor().getName() + "\"" +
+                        ",\"timeStampEpoch\":" + epoch + "" +
+                        ",\"timeStampIso\":\"" + timestamp + "\"" +
+                        ",\"temp\":" + String.valueOf(temp) + "" +
+                        ",\"hmdt\":" + String.valueOf(hmdt) + "}";
+                Log.i(TAG, strVal);
+                mIsScanning = false;
+                awsIot.publish("device/"+currentSensor().getName()+"/devicePayload", strVal);
             }
         }
     };
@@ -345,6 +357,7 @@ public class GattServerActivity extends Activity {
         intentFilter.addAction(BluetoothLeService.ACTION_SCAN_FINISHED);
         intentFilter.addAction(BluetoothLeService.ACTION_GATT_SERVICES_DISCOVERED);
         intentFilter.addAction(BluetoothLeService.ACTION_DATA_AVAILABLE);
+        intentFilter.addAction(BluetoothLeService.ACTION_BROADCAST_DATA_AVAILABLE);
 
         return intentFilter;
     }

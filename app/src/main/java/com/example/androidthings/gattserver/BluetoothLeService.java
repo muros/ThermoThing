@@ -41,6 +41,8 @@ public class BluetoothLeService extends Service {
             "com.example.bluetooth.le.ACTION_GATT_SERVICES_DISCOVERED";
     public final static String ACTION_DATA_AVAILABLE =
             "com.example.bluetooth.le.ACTION_DATA_AVAILABLE";
+    public final static String ACTION_BROADCAST_DATA_AVAILABLE =
+            "com.example.bluetooth.le.ACTION_BROADCAST_DATA_AVAILABLE";
     public final static String EXTRA_DATA =
             "com.example.bluetooth.le.EXTRA_DATA";
     public final static String DATA_TYPE =
@@ -51,6 +53,8 @@ public class BluetoothLeService extends Service {
             "com.example.bluetooth.le.DATA_TYPE_HMDT";
     public final static String DATA_TYPE_LUX =
             "com.example.bluetooth.le.DATA_TYPE_LUX";
+    public final static String DATA_TYPE_DHT =
+            "com.example.bluetooth.le.DATA_TYPE_DHT";
 
     /** LE scan handler */
     private Handler mLeScanHandler;
@@ -192,15 +196,20 @@ public class BluetoothLeService extends Service {
                         String deviceName = device.getName();
                         String deviceMac = device.getAddress();
                         ScanRecord scanRecord = result.getScanRecord();
-                        byte[] manuData = scanRecord.getManufacturerSpecificData(0x0059);
-                        Log.d(TAG, "Device manufacturer data: " + manuData);
                         BluetoothLeScanner bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
                         Log.i(TAG, "Device: " + deviceName + " (" + deviceMac + ")");
                         if (mScannedMac.equalsIgnoreCase(deviceMac)) {
                             Log.i(TAG, "Device FOUND.");
+                            byte[] manuData = scanRecord.getManufacturerSpecificData(0x0059);
+                            Log.d(TAG, "Device manufacturer data: " + manuData);
                             bluetoothLeScanner.stopScan(mLeScanCallback);
                             mScanning = false;
-                            connect(deviceMac);
+                            if (Dht22.chechSum(manuData)) {
+                                broadcastUpdate(ACTION_BROADCAST_DATA_AVAILABLE, manuData);
+                            } else {
+                                Log.e(TAG, "Wrong checksum on DHT data.");
+                                broadcastUpdate(ACTION_SCAN_FINISHED);
+                            }
                         }
                     }
                 });
@@ -454,6 +463,24 @@ public class BluetoothLeService extends Service {
                         stringBuilder.toString());
             }
         }
+        sendBroadcast(intent);
+    }
+
+    /**
+     * Broadcast action / event and additional data. Used for returning data
+     * read from manufacturer broadcast data of BLE sensor.
+     *
+     * @param action event / data read usually
+     * @param data broadcast data
+     */
+    private void broadcastUpdate(final String action,
+                                 final byte[] data) {
+
+        final Intent intent = new Intent(action);
+
+        intent.putExtra(DATA_TYPE, DATA_TYPE_DHT);
+        intent.putExtra(DATA_TYPE_TEMP, Double.valueOf(Dht22.temp(data)));
+        intent.putExtra(DATA_TYPE_HMDT, Double.valueOf(Dht22.humidity(data)));
         sendBroadcast(intent);
     }
 }
